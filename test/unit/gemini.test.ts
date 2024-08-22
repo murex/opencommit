@@ -70,14 +70,12 @@ describe('Gemini', () => {
     process.env.OCO_AI_PROVIDER = 'gemini';
     
     mockGemini();
-    
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it('should exit process if model is not supported and command is not config', () => {
     process.env.OCO_GEMINI_API_KEY = undefined;
     process.env.OCO_AI_PROVIDER = 'gemini';
-
     mockGemini();
 
     expect(mockExit).toHaveBeenCalledWith(1);

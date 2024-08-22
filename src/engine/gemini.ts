@@ -25,7 +25,7 @@ export class Gemini implements AiEngine {
   constructor() {
     this.config = getConfig() as ConfigType;
     this.googleGenerativeAi = new GoogleGenerativeAI(this.config.OCO_GEMINI_API_KEY);
-    
+    this.config.OCO_AI_PROVIDER="gemini";
     this.warmup();
   }
 
@@ -100,7 +100,6 @@ export class Gemini implements AiEngine {
     const [command, mode] = process.argv.slice(2);
 
     const provider = this.config.OCO_AI_PROVIDER;
-
     if (provider === 'gemini' && !this.apiKey &&
       command !== 'config' && mode !== 'set') {
       intro('opencommit');

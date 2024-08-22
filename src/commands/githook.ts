@@ -1,16 +1,26 @@
 import chalk from 'chalk';
 import { command } from 'cleye';
 import { existsSync } from 'fs';
+import { execa } from 'execa';
 import fs from 'fs/promises';
 import path from 'path';
 
 import { intro, outro } from '@clack/prompts';
 
 import { COMMANDS } from '../CommandsEnum.js';
-import { assertGitRepo, getCoreHooksPath } from '../utils/git.js';
+import { getVCS } from '../utils/vcs.js';
 
+const vcs = getVCS();
 const HOOK_NAME = 'prepare-commit-msg';
 const DEFAULT_SYMLINK_URL = path.join('.git', 'hooks', HOOK_NAME);
+
+
+export const getCoreHooksPath = async (): Promise<string> => {
+  const { stdout } = await execa('git', ['config', 'core.hooksPath']);
+
+  return stdout;
+};
+
 
 const getHooksPath = async (): Promise<string> => {
   try {
@@ -40,7 +50,7 @@ export const hookCommand = command(
     const HOOK_URL = __filename;
     const SYMLINK_URL = await getHooksPath();
     try {
-      await assertGitRepo();
+      await vcs.assertVCS();
 
       const { setUnset: mode } = argv._;
 

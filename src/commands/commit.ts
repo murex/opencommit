@@ -7,22 +7,16 @@ import {
   isCancel,
   multiselect,
   outro,
-  select,
   spinner
 } from '@clack/prompts';
 
 import { generateCommitMessageByDiff } from '../generateCommitMessageFromGitDiff';
-import {
-  assertGitRepo,
-  getChangedFiles,
-  getDiff,
-  getStagedFiles,
-  gitAdd
-} from '../utils/git';
 import { trytm } from '../utils/trytm';
 import { getConfig } from './config';
+import { getVCS } from '../utils/vcs';
 
 const config = getConfig();
+const vcs = getVCS();
 
 const getGitRemotes = async () => {
   const { stdout } = await execa('git', ['remote']);
@@ -42,16 +36,17 @@ const generateCommitMessageFromGitDiff = async (
   diff: string,
   extraArgs: string[],
   fullGitMojiSpec: boolean,
-  skipCommitConfirmation: boolean
+  skipCommitConfirmation: boolean,
+  jiraIssue: String
 ): Promise<void> => {
-  await assertGitRepo();
+  await vcs.assertVCS();
   const commitSpinner = spinner();
   commitSpinner.start('Generating the commit message');
 
   try {
     let commitMessage = await generateCommitMessageByDiff(
       diff,
-      fullGitMojiSpec
+      fullGitMojiSpec                     
     );
 
     const messageTemplate = checkMessageTemplate(extraArgs);
@@ -68,6 +63,8 @@ const generateCommitMessageFromGitDiff = async (
       );
     }
 
+    if( jiraIssue ) commitMessage += "\n\n[" + jiraIssue + "]"
+    
     commitSpinner.stop('📝 Commit message generated');
 
     outro(
@@ -82,78 +79,7 @@ ${chalk.grey('——————————————————')}`
     });
 
     if (isCommitConfirmedByUser && !isCancel(isCommitConfirmedByUser)) {
-      const { stdout } = await execa('git', [
-        'commit',
-        '-m',
-        commitMessage,
-        ...extraArgs
-      ]);
-
-      outro(`${chalk.green('✔')} Successfully committed`);
-
-      outro(stdout);
-
-      const remotes = await getGitRemotes();
-
-      // user isn't pushing, return early
-      if (config?.OCO_GITPUSH === false)
-          return
-
-      if (!remotes.length) {
-        const { stdout } = await execa('git', ['push']);
-        if (stdout) outro(stdout);
-        process.exit(0);
-      }
-
-      if (remotes.length === 1 && config?.OCO_GITPUSH !== true) {
-        const isPushConfirmedByUser = await confirm({
-          message: 'Do you want to run `git push`?'
-        });
-
-        if (isPushConfirmedByUser && !isCancel(isPushConfirmedByUser)) {
-          const pushSpinner = spinner();
-
-          pushSpinner.start(`Running 'git push ${remotes[0]}'`);
-
-          const { stdout } = await execa('git', [
-            'push',
-            '--verbose',
-            remotes[0]
-          ]);
-
-          pushSpinner.stop(
-            `${chalk.green('✔')} Successfully pushed all commits to ${
-              remotes[0]
-            }`
-          );
-
-          if (stdout) outro(stdout);
-        } else {
-          outro('`git push` aborted');
-          process.exit(0);
-        }
-      } else {
-        const selectedRemote = (await select({
-          message: 'Choose a remote to push to',
-          options: remotes.map((remote) => ({ value: remote, label: remote }))
-        })) as string;
-
-        if (!isCancel(selectedRemote)) {
-          const pushSpinner = spinner();
-
-          pushSpinner.start(`Running 'git push ${selectedRemote}'`);
-
-          const { stdout } = await execa('git', ['push', selectedRemote]);
-
-          pushSpinner.stop(
-            `${chalk.green(
-              '✔'
-            )} Successfully pushed all commits to ${selectedRemote}`
-          );
-
-          if (stdout) outro(stdout);
-        } else outro(`${chalk.gray('✖')} process cancelled`);
-      }
+        await vcs.commitAndPush(commitMessage, extraArgs)
     }
     if (!isCommitConfirmedByUser && !isCancel(isCommitConfirmedByUser)) {
       const regenerateMessage = await confirm({
@@ -163,7 +89,9 @@ ${chalk.grey('——————————————————')}`
         await generateCommitMessageFromGitDiff(
           diff,
           extraArgs,
-          fullGitMojiSpec
+          fullGitMojiSpec,
+          skipCommitConfirmation,
+          jiraIssue
         )
       }
     }
@@ -180,21 +108,22 @@ export async function commit(
   extraArgs: string[] = [],
   isStageAllFlag: Boolean = false,
   fullGitMojiSpec: boolean = false,
-  skipCommitConfirmation: boolean = false
+  skipCommitConfirmation: boolean = false,
+  jiraIssue: String = ""
 ) {
   if (isStageAllFlag) {
-    const changedFiles = await getChangedFiles();
+    const changedFiles = await vcs.getChangedFiles();
 
-    if (changedFiles) await gitAdd({ files: changedFiles });
+    if (changedFiles) await vcs.isolateChanges({ files: changedFiles });
     else {
       outro('No changes detected, write some code and run `oco` again');
       process.exit(1);
     }
   }
 
-  const [stagedFiles, errorStagedFiles] = await trytm(getStagedFiles());
-  const [changedFiles, errorChangedFiles] = await trytm(getChangedFiles());
-
+  const [stagedFiles, errorStagedFiles] = await trytm(vcs.getFilesToCommit());
+  const [changedFiles, errorChangedFiles] = await trytm(vcs.getChangedFiles());
+  
   if (!changedFiles?.length && !stagedFiles?.length) {
     outro(chalk.red('No changes detected'));
     process.exit(1);
@@ -235,10 +164,10 @@ export async function commit(
 
       if (isCancel(files)) process.exit(1);
 
-      await gitAdd({ files });
+      await vcs.isolateChanges({ files });
     }
 
-    await commit(extraArgs, false, fullGitMojiSpec);
+    await commit(extraArgs, false, fullGitMojiSpec, skipCommitConfirmation, jiraIssue);
     process.exit(1);
   }
 
@@ -250,10 +179,11 @@ export async function commit(
 
   const [, generateCommitError] = await trytm(
     generateCommitMessageFromGitDiff(
-      await getDiff({ files: stagedFiles }),
+      await vcs.getDiff({ files: stagedFiles }),
       extraArgs,
       fullGitMojiSpec,
-      skipCommitConfirmation
+      skipCommitConfirmation,
+      jiraIssue
     )
   );
 

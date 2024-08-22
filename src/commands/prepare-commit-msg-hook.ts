@@ -4,10 +4,11 @@ import fs from 'fs/promises';
 import { intro, outro, spinner } from '@clack/prompts';
 
 import { generateCommitMessageByDiff } from '../generateCommitMessageFromGitDiff';
-import { getChangedFiles, getDiff, getStagedFiles, gitAdd } from '../utils/git';
+import { GitVCS } from '../utils/VCS/git';
 import { getConfig } from './config';
 
 const [messageFilePath, commitSource] = process.argv.slice(2);
+const gitVCS = new GitVCS()
 
 export const prepareCommitMessageHook = async (
   isStageAllFlag: Boolean = false
@@ -22,16 +23,16 @@ export const prepareCommitMessageHook = async (
     if (commitSource) return;
 
     if (isStageAllFlag) {
-      const changedFiles = await getChangedFiles();
+      const changedFiles = await gitVCS.getChangedFiles();
 
-      if (changedFiles) await gitAdd({ files: changedFiles });
+      if (changedFiles) await gitVCS.isolateChanges({ files: changedFiles });
       else {
         outro('No changes detected, write some code and run `oco` again');
         process.exit(1);
       }
     }
 
-    const staged = await getStagedFiles();
+    const staged = await gitVCS.getFilesToCommit();
 
     if (!staged) return;
 
@@ -49,7 +50,7 @@ export const prepareCommitMessageHook = async (
     spin.start('Generating commit message');
 
     const commitMessage = await generateCommitMessageByDiff(
-      await getDiff({ files: staged })
+      await gitVCS.getDiff({ files: staged })
     );
     spin.stop('Done');
 
